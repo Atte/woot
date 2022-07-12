@@ -2,7 +2,7 @@
 
 An **unofficial** command line client for Wooting keyboards.
 
-Only properly tested on Windows with a 60HE, but _should_ work on all Lekker based Wootings on all major platforms.
+Only properly tested on Windows with a 60HE, but _should_ work on all Lekker based Wootings on all major platforms. Or it might brick them. Who knows.
 
 ## Probably supported keyboards
 
@@ -14,8 +14,8 @@ Only properly tested on Windows with a 60HE, but _should_ work on all Lekker bas
 
 - Windows
 - Linux
-- BSD etc.
 - MacOS
+- BSD (autoswitch not available)
 
 ## How to use?
 

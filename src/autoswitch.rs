@@ -1,4 +1,6 @@
 use crate::{device::Device, proto::lekker, Result};
+use active_win_pos_rs::get_active_window;
+use color_eyre::eyre::eyre;
 use serde::Deserialize;
 use std::{
     convert::Infallible,
@@ -7,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use sysinfo::{ProcessExt, ProcessRefreshKind, System, SystemExt};
+use sysinfo::{Pid, ProcessExt, ProcessRefreshKind, System, SystemExt};
 
 #[derive(Debug, Clone, Deserialize)]
 struct Config {
@@ -33,26 +35,64 @@ pub fn run(device: Device, config_path: &Path) -> Result<Infallible> {
     };
 
     let mut system = System::new();
+    let mut previous_window_id = String::new();
 
     loop {
-        system.refresh_processes_specifics(ProcessRefreshKind::new());
+        let window = get_active_window().map_err(|_| eyre!("Unable to get active window"))?;
+        if window.window_id != previous_window_id {
+            previous_window_id = window.window_id;
 
-        for rule in &config.rules {
-            if system.processes().values().any(|proc| {
-                rule.name.as_ref().map_or(false, |name| proc.name() == name)
-                    || rule.exe.as_ref().map_or(false, |exe| proc.exe() == exe)
-                    || rule.cmd.as_ref().map_or(false, |cmd| proc.cmd() == cmd)
-            }) {
-                if let Some(wanted) = rule.profile {
-                    let current = device.feature_report(lekker::GetCurrentKeyboardProfileIndex)?;
-                    if current != wanted {
-                        println!("switching to profile {}", wanted);
-                        device.feature_report(lekker::ActivateProfile(wanted))?;
-                        // reload seems to be required to get all settings to apply properly
-                        device.feature_report(lekker::ReloadProfile)?;
+            // cfg to match https://docs.rs/sysinfo/latest/src/sysinfo/common.rs.html#76
+            #[cfg(all(
+                not(feature = "unknown-ci"),
+                any(
+                    target_os = "freebsd",
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "macos",
+                    target_os = "ios",
+                )
+            ))]
+            let pid = Pid::from(window.process_id as i32);
+
+            #[cfg(not(all(
+                not(feature = "unknown-ci"),
+                any(
+                    target_os = "freebsd",
+                    target_os = "linux",
+                    target_os = "android",
+                    target_os = "macos",
+                    target_os = "ios",
+                )
+            )))]
+            let pid = Pid::from(window.process_id as usize);
+
+            // failure is likely just a race condition as a window is closed
+            if system.refresh_process_specifics(pid, ProcessRefreshKind::new()) {
+                let process = system
+                    .process(pid)
+                    .ok_or_else(|| eyre!("sysinfo lied about process existing"))?;
+                for rule in &config.rules {
+                    if rule
+                        .name
+                        .as_ref()
+                        .map_or(false, |name| process.name() == name)
+                        || rule.exe.as_ref().map_or(false, |exe| process.exe() == exe)
+                        || rule.cmd.as_ref().map_or(false, |cmd| process.cmd() == cmd)
+                    {
+                        if let Some(wanted) = rule.profile {
+                            let current =
+                                device.feature_report(lekker::GetCurrentKeyboardProfileIndex)?;
+                            if current != wanted {
+                                println!("switching to profile {}", wanted);
+                                device.feature_report(lekker::ActivateProfile(wanted))?;
+                                // reload seems to be required to get all settings to apply properly
+                                device.feature_report(lekker::ReloadProfile)?;
+                            }
+                        }
+                        break;
                     }
                 }
-                break;
             }
         }
 
