@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{bail, eyre, Result};
 use hidapi::HidApi;
 use std::path::PathBuf;
 
@@ -43,8 +43,10 @@ enum Commands {
     /// Automatically switch profiles based on a configuration file
     #[cfg(feature = "autoswitch")]
     Autoswitch {
+        /// Don't stay running to monitor window changes
+        #[clap(short = '1', long)]
+        oneshot: bool,
         /// Path to configuration file (see README.md for format)
-        #[clap(value_parser)]
         config: PathBuf,
     },
 }
@@ -77,16 +79,18 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let info = infos
-        .into_iter()
-        .find(|info| {
-            if let Some(ref serial) = args.serial {
-                info.serial_number() == Some(serial)
-            } else {
-                true
-            }
-        })
-        .ok_or_else(|| eyre!("No Wooting devices found!"))?;
+    let info = if let Some(ref serial) = args.serial {
+        infos
+            .into_iter()
+            .find(|info| info.serial_number() == Some(serial))
+            .ok_or_else(|| eyre!("No Wooting device matching the given serial found!"))?
+    } else if infos.len() > 1 {
+        bail!("--serial is required when multiple Wooting devices are plugged in!");
+    } else {
+        infos
+            .first()
+            .ok_or_else(|| eyre!("No Wooting devices found!"))?
+    };
 
     let device = Device::new(info.open_device(&hidapi)?);
 
@@ -117,8 +121,8 @@ fn main() -> Result<()> {
             device.feature_report(lekker::ReloadProfile)?;
         }
         #[cfg(feature = "autoswitch")]
-        Commands::Autoswitch { config } => {
-            autoswitch::run(device, &config)?;
+        Commands::Autoswitch { oneshot, config } => {
+            autoswitch::run(device, &config, oneshot)?;
         }
     }
 

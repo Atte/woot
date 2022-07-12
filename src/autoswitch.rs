@@ -3,7 +3,6 @@ use active_win_pos_rs::get_active_window;
 use color_eyre::eyre::eyre;
 use serde::Deserialize;
 use std::{
-    convert::Infallible,
     fs::File,
     io::Read,
     path::{Path, PathBuf},
@@ -26,7 +25,7 @@ struct Rule {
     cmd: Option<Vec<String>>,
 }
 
-pub fn run(device: Device, config_path: &Path) -> Result<Infallible> {
+pub fn run(device: Device, config_path: &Path, oneshot: bool) -> Result<()> {
     let config: Config = {
         let mut fh = File::open(config_path)?;
         let mut buffer = String::new();
@@ -96,6 +95,11 @@ pub fn run(device: Device, config_path: &Path) -> Result<Infallible> {
             }
         }
 
+        if oneshot {
+            break;
+        }
         std::thread::sleep(Duration::from_secs(config.interval));
     }
+
+    Ok(())
 }
