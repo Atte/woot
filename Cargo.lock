@@ -989,6 +989,7 @@ version = "0.1.0"
 dependencies = [
  "active-win-pos-rs",
  "bytes",
+ "cfg-if",
  "clap 3.2.10",
  "color-eyre",
  "env_logger",
@@ -998,6 +999,7 @@ dependencies = [
  "serde",
  "sysinfo",
  "toml",
+ "winapi",
 ]
 
 [[package]]

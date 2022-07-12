@@ -1,6 +1,5 @@
 use crate::{device::Device, proto::lekker, Result};
 use active_win_pos_rs::get_active_window;
-use color_eyre::eyre::eyre;
 use serde::Deserialize;
 use std::{
     fs::File,
@@ -37,68 +36,87 @@ pub fn run(device: Device, config_path: &Path, oneshot: bool) -> Result<()> {
     let mut previous_window_id = String::new();
 
     loop {
-        let window = get_active_window().map_err(|_| eyre!("Unable to get active window"))?;
-        if window.window_id != previous_window_id {
-            previous_window_id = window.window_id;
-
-            // cfg to match https://docs.rs/sysinfo/latest/src/sysinfo/common.rs.html#76
-            #[cfg(all(
-                not(feature = "unknown-ci"),
-                any(
-                    target_os = "freebsd",
-                    target_os = "linux",
-                    target_os = "android",
-                    target_os = "macos",
-                    target_os = "ios",
-                )
-            ))]
-            let pid = Pid::from(window.process_id as i32);
-
-            #[cfg(not(all(
-                not(feature = "unknown-ci"),
-                any(
-                    target_os = "freebsd",
-                    target_os = "linux",
-                    target_os = "android",
-                    target_os = "macos",
-                    target_os = "ios",
-                )
-            )))]
-            let pid = Pid::from(window.process_id as usize);
-
-            // failure is likely just a race condition as a window is closed
-            if system.refresh_process_specifics(pid, ProcessRefreshKind::new()) {
-                let process = system
-                    .process(pid)
-                    .ok_or_else(|| eyre!("sysinfo lied about process existing"))?;
-                for rule in &config.rules {
-                    if rule
-                        .name
-                        .as_ref()
-                        .map_or(false, |name| process.name() == name)
-                        || rule.exe.as_ref().map_or(false, |exe| process.exe() == exe)
-                        || rule.cmd.as_ref().map_or(false, |cmd| process.cmd() == cmd)
-                    {
-                        if let Some(wanted) = rule.profile {
-                            let current =
-                                device.feature_report(lekker::GetCurrentKeyboardProfileIndex)?;
-                            if current != wanted {
-                                println!("switching to profile {}", wanted);
-                                device.feature_report(lekker::ActivateProfile(wanted))?;
-                                // reload seems to be required to get all settings to apply properly
-                                device.feature_report(lekker::ReloadProfile)?;
-                            }
-                        }
-                        break;
-                    }
-                }
+        if let Ok(window) = get_active_window() {
+            if window.window_id != previous_window_id {
+                log::trace!("window: {:?}", &window);
+                previous_window_id = window.window_id;
+                process_activated(&config, &mut system, &device, window.process_id)?;
             }
         }
 
         if oneshot {
             break;
         }
+
         std::thread::sleep(Duration::from_secs(config.interval));
+    }
+
+    Ok(())
+}
+
+fn process_activated(
+    config: &Config,
+    system: &mut System,
+    device: &Device,
+    process_id: u64,
+) -> Result<()> {
+    // cfg to match https://docs.rs/sysinfo/latest/src/sysinfo/common.rs.html#76
+    let pid;
+    cfg_if::cfg_if! {
+        if #[cfg(all(
+            not(feature = "unknown-ci"),
+            any(
+                target_os = "freebsd",
+                target_os = "linux",
+                target_os = "android",
+                target_os = "macos",
+                target_os = "ios",
+            )
+        ))] {
+            pid = Pid::from(process_id as i32)
+        } else if #[cfg(windows)] {
+            // resolve thread ID to base process ID
+            let base_process_id = unsafe {
+                let handle = winapi::um::processthreadsapi::OpenThread(
+                    winapi::um::winnt::THREAD_QUERY_LIMITED_INFORMATION,
+                    0,
+                    process_id as winapi::shared::minwindef::DWORD
+                );
+                let id = winapi::um::processthreadsapi::GetProcessIdOfThread(handle);
+                winapi::um::handleapi::CloseHandle(handle);
+                id
+            };
+            pid = Pid::from(if base_process_id == 0 { process_id as usize } else { base_process_id as usize })
+        } else {
+            pid = Pid::from(window.process_id as usize)
+        }
+    };
+
+    system.refresh_process_specifics(pid, ProcessRefreshKind::new());
+
+    // failure is likely just a race condition as a window is closed
+    if let Some(process) = system.process(pid) {
+        log::trace!("process: {:?}", process);
+        for rule in &config.rules {
+            if rule
+                .name
+                .as_ref()
+                .map_or(true, |name| process.name() == name)
+                && rule.exe.as_ref().map_or(true, |exe| process.exe() == exe)
+                && rule.cmd.as_ref().map_or(true, |cmd| process.cmd() == cmd)
+            {
+                if let Some(wanted) = rule.profile {
+                    let current = device.feature_report(lekker::GetCurrentKeyboardProfileIndex)?;
+                    if current != wanted {
+                        println!("switching to profile {}", wanted);
+                        device.feature_report(lekker::ActivateProfile(wanted))?;
+                        // reload seems to be required to get all settings to apply properly
+                        device.feature_report(lekker::ReloadProfile)?;
+                    }
+                }
+                break;
+            }
+        }
     }
 
     Ok(())

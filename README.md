@@ -31,19 +31,19 @@ If no rules match, the profile is not changed, so you might want to add a rule w
 
 ```toml
 [[rules]]
-name = "Overwatch"
-profile = 3
-
-[[rules]]
 cmd = ["java", "-jar", "C:/Games/minecraft.jar"]
 profile = 2
 
 [[rules]]
-name = "Program Needing Multiple Profiles"
+name = "Overwatch.exe"
+profile = 3
 
 [[rules]]
 exe = "C:/Games/CounterStrike/CS.exe"
 profile = 3
+
+[[rules]]
+name = "Program that shouldn't cause a switch"
 
 [[rules]]
 profile = 0

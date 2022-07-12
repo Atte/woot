@@ -1,2 +1,7 @@
-.direnv
-target
+/.direnv
+/target
+
+/*.toml
+!/Cargo.toml
+
+/.env
