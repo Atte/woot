@@ -12,6 +12,7 @@ pkgs.mkShell {
     pkg-config
     hidapi
     libusb1
+    xorg.libxcb
   ];
 
   RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
