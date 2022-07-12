@@ -2,6 +2,7 @@ use crate::{proto::Report, Result};
 use bytes::{Buf, BufMut, Bytes};
 use color_eyre::eyre::bail;
 use num_enum::TryFromPrimitive;
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, TryFromPrimitive)]
 #[repr(u8)]
@@ -111,10 +112,35 @@ pub struct Serial {
 #[repr(u8)]
 pub enum ProductionStage {
     Mass = 0,
-    PVT = 1,
-    DVT = 2,
-    EVT = 3,
+    Pvt = 1,
+    Dvt = 2,
+    Evt = 3,
     Prototype = 4,
+}
+
+impl Display for Serial {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "A{:02}B{:02}{:02}W{:02}{}{}{:05}",
+            self.supplier_number,
+            self.year,
+            self.week_number,
+            self.product_number,
+            self.revision_number,
+            match self.production_stage.ok_or_else(|| {
+                log::error!("unknown production stage");
+                std::fmt::Error
+            })? {
+                ProductionStage::Mass => 'H',
+                ProductionStage::Pvt => 'P',
+                ProductionStage::Dvt => 'T',
+                ProductionStage::Evt => 'E',
+                ProductionStage::Prototype => 'X',
+            },
+            self.product_id
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -150,6 +176,17 @@ impl Report for ActivateProfile {
     #[inline]
     fn read_response(_buffer: impl Buf) -> Result<Self::Response> {
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GetCurrentKeyboardProfileIndex;
+impl Report for GetCurrentKeyboardProfileIndex {
+    const TYPE: u8 = Type::GetCurrentKeyboardProfileIndex as u8;
+    type Response = u8;
+
+    fn read_response(mut buffer: impl Buf) -> Result<Self::Response> {
+        Ok(buffer.get_u8())
     }
 }
 

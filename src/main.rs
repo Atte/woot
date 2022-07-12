@@ -1,12 +1,16 @@
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{eyre, Result};
 use hidapi::HidApi;
+use std::path::PathBuf;
 
 use crate::device::Device;
 use crate::proto::{lekker, USAGE_PAGE};
 
-pub mod device;
-pub mod proto;
+mod device;
+mod proto;
+
+#[cfg(feature = "autoswitch")]
+mod autoswitch;
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -28,11 +32,20 @@ enum Commands {
     GetVersion,
     /// Get keyboard serial number
     GetSerial,
+    /// Get the currently active profile index
+    GetCurrentProfile,
     /// Activate a profile saved on the keyboard
     ActivateProfile {
         /// Profile to activate (0 for digital, 1-3 for analog)
         #[clap(value_parser = clap::value_parser!(u8).range(0..=3))]
         index: u8,
+    },
+    /// Automatically switch profiles based on a configuration file
+    #[cfg(feature = "autoswitch")]
+    Autoswitch {
+        /// Path to configuration file (see README.md for format)
+        #[clap(value_parser)]
+        config: PathBuf,
     },
 }
 
@@ -91,31 +104,21 @@ fn main() -> Result<()> {
         }
         Commands::GetSerial => {
             let serial = device.feature_report(lekker::GetSerial)?;
-            eprintln!("{:?}", &serial);
-            println!(
-                "A{:02}B{:02}{:02}W{:02}{}{}{:05}",
-                serial.supplier_number,
-                serial.year,
-                serial.week_number,
-                serial.product_number,
-                serial.revision_number,
-                match serial
-                    .production_stage
-                    .ok_or_else(|| eyre!("unknown production stage"))?
-                {
-                    lekker::ProductionStage::Mass => 'H',
-                    lekker::ProductionStage::PVT => 'P',
-                    lekker::ProductionStage::DVT => 'T',
-                    lekker::ProductionStage::EVT => 'E',
-                    lekker::ProductionStage::Prototype => 'X',
-                },
-                serial.product_id
-            );
+            log::info!("{:?}", serial);
+            println!("{}", serial);
+        }
+        Commands::GetCurrentProfile => {
+            let index = device.feature_report(lekker::GetCurrentKeyboardProfileIndex)?;
+            println!("{}", index);
         }
         Commands::ActivateProfile { index } => {
             device.feature_report(lekker::ActivateProfile(index))?;
             // reload seems to be required to get all settings to apply properly
             device.feature_report(lekker::ReloadProfile)?;
+        }
+        #[cfg(feature = "autoswitch")]
+        Commands::Autoswitch { config } => {
+            autoswitch::run(device, &config)?;
         }
     }
 
